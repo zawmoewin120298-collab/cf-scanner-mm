@@ -5,6 +5,44 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # === Base Settings ===
       - PORT=8080
       - SERVE_STATIC=1
+      
+      # === AIS SIM Card Optimization ===
+      - CONCURRENCY=15              # ပုံမှန် 1000 → 15 သို့ လျှော့ (AIS ပိတ်မှုရှောင်ရန်)
+      - TIMEOUT=3                   # 5s → 3s (အမြန်ပျက်တွေကို စစ်ထုတ်)
+      - SCAN_INTERVAL=200           # စကင်နှုန်းနှေးစေရန် (မီလီစက္ကန့်)
+      - MAX_RETRIES=2               # အကြိမ်ရေ ပြန်စမ်းနိုင်မှု လျှော့
+      
+      # === DNS Settings (AIS Block Bypass) ===
+      - DNS_SERVER=1.1.1.1          # Cloudflare DNS တိုက်ရိုက်သုံး
+      - DNS_OVER_HTTPS=true
+      - DOH_URL=https://cloudflare-dns.com/dns-query
+      - DNS_CACHE_TTL=300
+      
+      # === Port Scanning ===
+      - SCAN_PORTS=80,443,8080,8443,53,123,993,995,5222,5223
+      # AIS ပိတ်နိုင်တဲ့ port တွေကိုရှောင်၊ အခြား port တွေထည့်စမ်း
+      
+      # === Output Control ===
+      - ENABLE_HISTORY=true
+      - MAX_HISTORY=50              # history သိမ်းရမည့်အရေအတွက် လျှော့
+      - EXPORT_FORMAT=txt,json
+      
+      # === Cloudflare DNS Update (ပိတ်ထားရန် အကြံပြု) ===
+      - CF_API_TOKEN=               # ဗလာထားပါ (auto-update ပိတ်သွားမယ်)
+      - CF_ZONE_ID=
+      - DNS_AUTO_UPDATE=false
+      
     restart: unless-stopped
+    
+    # === Resource Limits (AIS သုံးရင် ထည့်သင့်) ===
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'               # CPU 50% သာ သုံးခွင့်ပြု
+          memory: 512M              # Memory 512MB သာ
+        reservations:
+          cpus: '0.25'
+          memory: 256M
