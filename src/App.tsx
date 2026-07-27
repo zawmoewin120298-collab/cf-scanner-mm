@@ -161,6 +161,7 @@ const STORAGE_KEYS = {
 const MAX_IPS_PER_RANGE = 200;
 
 const DEFAULT_RANGES = [
+  "49.228.176.0/22",
   "173.245.48.0/20",
   "103.21.244.0/22",
   "103.22.200.0/22",
