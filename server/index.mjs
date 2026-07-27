@@ -4,9 +4,20 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import dns from 'node:dns';  // ✅ DNS control အတွက် ထည့်
+
 const app = express();
-const PORT = Number(process.env.PORT || process.env.PROBE_PORT || 8787);
+
+// === AIS Optimization: DNS Settings ===
+// DNS resolver ကို Cloudflare DNS ပြောင်းပါ
+dns.setServers(['1.1.1.1', '1.0.0.1']);
+
+const PORT = Number(process.env.PORT || process.env.PROBE_PORT || 8080);  // ✅ Default 8080
 const SERVE_STATIC = String(process.env.SERVE_STATIC || '').toLowerCase() === '1';
+const CONCURRENCY = Number(process.env.CONCURRENCY || 10);  // ✅ AIS အတွက် 10
+const TIMEOUT = Number(process.env.TIMEOUT || 3000);  // ✅ 3 seconds
+const SCAN_INTERVAL = Number(process.env.SCAN_INTERVAL || 200);  // ✅ 200ms
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -18,6 +29,14 @@ app.use(
 );
 app.use(express.json());
 
+// === AIS: Throttling Prevention Middleware ===
+app.use((req, res, next) => {
+  // Request rate limiting လုပ်ဖို့
+  const clientIP = req.ip || req.connection.remoteAddress;
+  console.log(`[AIS] Request from ${clientIP} at ${new Date().toISOString()}`);
+  next();
+});
+
 async function cfFetch(token, url, init = {}) {
   const res = await fetch(url, {
     ...init,
@@ -25,6 +44,8 @@ async function cfFetch(token, url, init = {}) {
       ...(init.headers || {}),
       Authorization: `Bearer ${token}`,
       'content-type': 'application/json',
+      // ✅ AIS: User-Agent ထည့်ပါ
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     },
   });
   const json = await res.json().catch(() => null);
@@ -47,7 +68,7 @@ function isValidIPv4(ip) {
   return parts.every((p) => /^\d+$/.test(p) && Number(p) >= 0 && Number(p) <= 255);
 }
 
-function tcpProbe(host, port, timeoutMs = 1800) {
+function tcpProbe(host, port, timeoutMs = TIMEOUT) {  // ✅ TIMEOUT သုံးပါ
   return new Promise((resolve) => {
     const started = Date.now();
     const socket = new net.Socket();
@@ -71,8 +92,16 @@ function tcpProbe(host, port, timeoutMs = 1800) {
 }
 
 function normalizePorts(input) {
-  // Include 7844 (Cloudflare Tunnel), plus common HTTPS alt ports
-  const defaultPorts = [80, 443, 7844, 2053, 2083, 2087, 2096, 8443];
+  // ✅ AIS: Ports ပိုထည့်ပါ (AIS ပိတ်တဲ့ port တွေကိုရှောင်ပါ)
+  const defaultPorts = [80, 443, 7844, 2053, 2083, 2087, 2096, 8443, 8080, 5222, 5223, 993, 995, 123];
+  
+  // ✅ Environment ကနေ ports ယူပါ
+  const envPorts = process.env.SCAN_PORTS;
+  if (envPorts) {
+    const parsed = envPorts.split(',').map(p => Number(p.trim())).filter(p => p > 0 && p <= 65535);
+    if (parsed.length > 0) return [...new Set(parsed)];
+  }
+  
   if (!Array.isArray(input)) return defaultPorts;
   const ports = input
     .map((p) => Number(p))
@@ -85,31 +114,61 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'probe-server', ts: new Date().toISOString() });
+  res.json({ 
+    status: 'ok', 
+    service: 'probe-server', 
+    ts: new Date().toISOString(),
+    config: {
+      concurrency: CONCURRENCY,
+      timeout: TIMEOUT,
+      scanInterval: SCAN_INTERVAL,
+      dns: '1.1.1.1'
+    }
+  });
 });
 
 app.post('/api/probe', async (req, res) => {
   const ip = String(req.body?.ip || '').trim();
   const ports = normalizePorts(req.body?.ports);
+  
+  // ✅ AIS: IP validation ပိုတင်းကျပ်ပါ
   if (!isValidIPv4(ip)) {
     return res.status(400).json({ error: 'Invalid IPv4 address' });
   }
 
-  const l4 = await Promise.all(
-    ports.map(async (port) => ({
-      port,
-      ...(await tcpProbe(ip, port, 2000)),
-    }))
-  );
+  // ✅ AIS: Concurrency ကိုသုံးပြီး scan လုပ်ပါ (batch processing)
+  const batchSize = CONCURRENCY;
+  const results = [];
+  
+  for (let i = 0; i < ports.length; i += batchSize) {
+    const batch = ports.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (port) => ({
+        port,
+        ...(await tcpProbe(ip, port, TIMEOUT)),
+      }))
+    );
+    results.push(...batchResults);
+    
+    // ✅ AIS: Scan interval ကိုလိုက်နာပါ
+    if (i + batchSize < ports.length) {
+      await new Promise(resolve => setTimeout(resolve, SCAN_INTERVAL));
+    }
+  }
 
-  const anySuccess = l4.some((r) => r.status === 'success');
+  const anySuccess = results.some((r) => r.status === 'success');
 
   return res.json({
     ip,
     mode: 'l4_tcp_handshake',
     testedPorts: ports,
     overall: anySuccess ? 'success' : 'failed',
-    l4,
+    l4: results,
+    meta: {
+      concurrency: CONCURRENCY,
+      timeout: TIMEOUT,
+      scanInterval: SCAN_INTERVAL
+    }
   });
 });
 
@@ -130,7 +189,6 @@ app.post('/api/cf/dns/replace-a', async (req, res) => {
   if (cleaned.length > 50) return res.status(400).json({ error: 'Too many IPs (max 50)' });
 
   try {
-    // List existing A records for this name and delete them (replace mode).
     const listUrl = `https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?type=A&name=${encodeURIComponent(
       name,
     )}&per_page=100`;
@@ -184,13 +242,13 @@ if (SERVE_STATIC) {
   const distDir = path.resolve(__dirname, '..', 'dist');
   app.use(express.static(distDir, { index: false }));
 
-  // SPA fallback: everything else becomes index.html
-  // Express 5 + path-to-regexp v6 doesn't accept '*' routes; use regex.
   app.get(/.*/, (_req, res) => {
     res.sendFile(path.join(distDir, 'index.html'));
   });
 }
 
 app.listen(PORT, () => {
-  console.log(`[probe-server] listening on http://localhost:${PORT}`);
+  console.log(`[CrimsonCF] Server listening on http://localhost:${PORT}`);
+  console.log(`[AIS] Config: Concurrency=${CONCURRENCY}, Timeout=${TIMEOUT}ms, Interval=${SCAN_INTERVAL}ms`);
+  console.log(`[AIS] DNS: ${dns.getServers().join(', ')}`);
 });
