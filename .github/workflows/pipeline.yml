@@ -1,4 +1,4 @@
-name: CI/CD (Images + GHCR + Docker Hub)
+name: cf-scanner-mm
 
 on:
   push:
