@@ -6,11 +6,12 @@ WORKDIR /app
 # === AIS Optimization: npm registry speed ===
 COPY package.json yarn.lock .yarnrc.yml ./
 COPY .yarn ./.yarn
+
+# Corepack ကို ပြင်ဆင်ပြီး Yarn Berry မဟုတ်သော `--network-timeout` များကို ဖယ်ရှားထားပါသည်
 RUN corepack enable \
   && yarn --version \
   && yarn config set npmRegistryServer https://registry.npmjs.org \
-  && yarn config set network-timeout 600000 \
-  && yarn install --immutable --inline-builds --network-timeout 600000
+  && yarn install --immutable --inline-builds
 
 COPY . .
 RUN yarn build
@@ -39,8 +40,7 @@ COPY .yarn ./.yarn
 RUN corepack enable \
   && yarn --version \
   && yarn config set npmRegistryServer https://registry.npmjs.org \
-  && yarn config set network-timeout 600000 \
-  && yarn install --immutable --inline-builds --mode=skip-build --network-timeout 600000
+  && yarn install --immutable --inline-builds --mode=skip-build
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/server ./server
@@ -51,3 +51,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 EXPOSE 8080
 CMD ["node", "server/index.mjs"]
+
