@@ -1,6 +1,6 @@
 # CrimsonCF
 
-[English](README.md) | [فارسی](README.fa.md)
+[English](README.md) |[MM](README.fa.md)
 
 **CrimsonCF (CrimsonCloudFlare)** is a fast **Cloudflare IP scanner web app** that tests endpoints using **Layer 4 (TCP handshake)** (not HTTPS), keeps scan history, exports clean newline TXT lists, and generates ready-to-import configs for **Xray-core**, **sing-box**, and **Clash**.
 
