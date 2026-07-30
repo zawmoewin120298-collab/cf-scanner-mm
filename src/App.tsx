@@ -1,4 +1,5 @@
- motion } from "framer-motion";
+ // src/App.tsx ရဲ့ အပေါ်ဆုံးမှာ ဒီလိုထားပါ
+import * as motion from "framer-motion";
 import {
   Activity,
   Cloud,
